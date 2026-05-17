@@ -1,0 +1,495 @@
+import re
+import streamlit as st
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# Must be the very first Streamlit command
+st.set_page_config(
+    page_title="ScamShield · Job Fraud Detector",
+    page_icon="🛡️",
+    layout="centered",
+)
+
+# ── Global CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@300;400;500&display=swap');
+
+/* ── Reset & root ── */
+:root {
+    --bg:         #08090c;
+    --surface:    #0f1117;
+    --panel:      #141720;
+    --border:     #1e2230;
+    --accent:     #00e5ff;
+    --accent-dim: #00b8cc;
+    --danger:     #ff3b5c;
+    --safe:       #00e5a0;
+    --text:       #e8eaf0;
+    --muted:      #5a6070;
+    --label:      #8890a8;
+}
+
+html, body, [data-testid="stApp"] {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { visibility: hidden !important; }
+[data-testid="stDecoration"] { display: none !important; }
+.block-container {
+    padding: 2rem 1.5rem 4rem !important;
+    max-width: 780px !important;
+}
+
+/* ── Hero header ── */
+.hero {
+    text-align: center;
+    padding: 3.5rem 0 2.5rem;
+    position: relative;
+}
+.hero-badge {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.3rem 0.9rem;
+    border-radius: 2px;
+    margin-bottom: 1.2rem;
+    background: rgba(0,229,255,0.04);
+}
+.hero-title {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.6rem;
+    background: linear-gradient(135deg, #ffffff 30%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero-sub {
+    font-size: 0.95rem;
+    color: var(--label);
+    font-weight: 300;
+    line-height: 1.6;
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+/* ── Section header ── */
+.section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 2.2rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+/* ── Input labels ── */
+label, [data-testid="stWidgetLabel"] p {
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.7rem !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: var(--label) !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.35rem !important;
+}
+
+/* ── Text inputs ── */
+input[type="text"],
+textarea,
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.88rem !important;
+    padding: 0.65rem 0.9rem !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.4) !important;
+}
+input[type="text"]:focus,
+textarea:focus,
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px rgba(0,229,255,0.1), inset 0 1px 3px rgba(0,0,0,0.4) !important;
+    outline: none !important;
+}
+input::placeholder, textarea::placeholder {
+    color: var(--muted) !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Column gap ── */
+[data-testid="stHorizontalBlock"] {
+    gap: 1rem !important;
+}
+
+/* ── Divider ── */
+hr {
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    margin: 1.8rem 0 !important;
+}
+
+/* ── Submit button ── */
+[data-testid="stFormSubmitButton"] button {
+    width: 100% !important;
+    background: var(--accent) !important;
+    color: #000 !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    border: none !important;
+    border-radius: 6px !important;
+    padding: 0.85rem 1.5rem !important;
+    cursor: pointer !important;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.1s !important;
+    box-shadow: 0 0 24px rgba(0,229,255,0.25), 0 2px 8px rgba(0,0,0,0.4) !important;
+    margin-top: 0.5rem !important;
+}
+[data-testid="stFormSubmitButton"] button:hover {
+    background: var(--accent-dim) !important;
+    box-shadow: 0 0 36px rgba(0,229,255,0.4), 0 4px 16px rgba(0,0,0,0.5) !important;
+    transform: translateY(-1px) !important;
+}
+[data-testid="stFormSubmitButton"] button:active {
+    transform: translateY(0) !important;
+}
+
+/* ── Result cards ── */
+.result-card {
+    border-radius: 10px;
+    padding: 2rem 2rem 1.8rem;
+    margin: 1.8rem 0 1rem;
+    position: relative;
+    overflow: hidden;
+}
+.result-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+}
+.result-scam {
+    background: rgba(255,59,92,0.07);
+    border: 1px solid rgba(255,59,92,0.3);
+}
+.result-scam::before  { background: var(--danger); }
+.result-safe {
+    background: rgba(0,229,160,0.07);
+    border: 1px solid rgba(0,229,160,0.3);
+}
+.result-safe::before  { background: var(--safe); }
+
+.result-icon { font-size: 2.2rem; margin-bottom: 0.6rem; }
+.result-verdict {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.5rem;
+}
+.result-scam  .result-verdict { color: var(--danger); }
+.result-safe  .result-verdict { color: var(--safe); }
+
+.result-desc {
+    font-size: 0.88rem;
+    color: var(--label);
+    line-height: 1.6;
+}
+
+/* ── Probability bar ── */
+.prob-row {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin-top: 1.4rem;
+}
+.prob-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+    width: 80px;
+}
+.prob-bar-wrap {
+    flex: 1;
+    height: 6px;
+    background: var(--border);
+    border-radius: 99px;
+    overflow: hidden;
+}
+.prob-bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.8s cubic-bezier(0.16,1,0.3,1);
+}
+.prob-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 500;
+    flex-shrink: 0;
+    width: 46px;
+    text-align: right;
+}
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+}
+[data-testid="stExpander"] summary {
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.12em !important;
+    color: var(--label) !important;
+    text-transform: uppercase !important;
+}
+[data-testid="stExpander"] code {
+    background: var(--bg) !important;
+    color: var(--accent) !important;
+    font-size: 0.75rem !important;
+    border-radius: 4px !important;
+}
+
+/* ── Warning ── */
+[data-testid="stAlert"] {
+    background: rgba(255,184,0,0.07) !important;
+    border: 1px solid rgba(255,184,0,0.25) !important;
+    border-radius: 8px !important;
+    color: #ffb800 !important;
+    font-size: 0.85rem !important;
+}
+
+/* ── Footer note ── */
+.footer-note {
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Model loading ─────────────────────────────────────────────────────────────
+MODEL_PATH = "./model"
+
+@st.cache_resource
+def load_model():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+    model.eval()
+    return tokenizer, model
+
+tokenizer, model = load_model()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def clean_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r'\n', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'http\S+', '', text)
+    text = re.sub(r'<.*?>', '', text)
+    return text.strip()
+
+
+def build_full_text(fields: dict) -> str:
+    text_defaults  = {k: "missing"  for k in ["title", "description", "requirements",
+                                               "company_profile", "benefits"]}
+    other_defaults = {k: "unknown"  for k in ["industry", "function"]}
+    defaults = {**text_defaults, **other_defaults}
+
+    def get(key):
+        val = fields.get(key, "").strip()
+        return clean_text(val) if val else defaults[key]
+
+    return (
+        f"TITLE: {get('title')} "
+        f"DESC: {get('description')} "
+        f"REQ: {get('requirements')} "
+        f"COMPANY: {get('company_profile')} "
+        f"BENEFITS: {get('benefits')} "
+        f"INDUSTRY: {get('industry')} "
+        f"FUNCTION: {get('function')}"
+    )
+
+
+def predict(full_text: str):
+    inputs = tokenizer(
+        full_text,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        max_length=512,
+    )
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    probs = torch.softmax(logits, dim=1)[0]
+    label = torch.argmax(logits, dim=1).item()
+    return label, probs[1].item()
+
+
+# ── UI ────────────────────────────────────────────────────────────────────────
+
+# Hero
+st.markdown("""
+<div class="hero">
+    <div class="hero-badge">AI · Fraud Detection · v1.0</div>
+    <h1 class="hero-title">ScamShield</h1>
+    <p class="hero-sub">
+        Paste a job posting and our fine-tuned model will assess whether
+        it's legitimate or a fraudulent listing — in seconds.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+# Form
+with st.form("job_form"):
+
+    st.markdown('<div class="section-label">Core Info</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([2, 1.5, 1.5])
+    with col1:
+        title    = st.text_input("Job Title ✦", placeholder="e.g. Senior Data Analyst")
+    with col2:
+        industry = st.text_input("Industry", placeholder="e.g. FinTech")
+    with col3:
+        function = st.text_input("Function", placeholder="e.g. Engineering")
+
+    st.markdown('<div class="section-label">Posting Details</div>', unsafe_allow_html=True)
+
+    company_profile = st.text_area(
+        "Company Profile",
+        placeholder="Brief description of the hiring company…",
+        height=110,
+    )
+    description = st.text_area(
+        "Job Description ✦",
+        placeholder="What will the employee do day-to-day…",
+        height=150,
+    )
+
+    col_r, col_b = st.columns(2)
+    with col_r:
+        requirements = st.text_area(
+            "Requirements",
+            placeholder="Skills, qualifications, experience…",
+            height=110,
+        )
+    with col_b:
+        benefits = st.text_area(
+            "Benefits",
+            placeholder="Salary, perks, insurance…",
+            height=110,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    submitted = st.form_submit_button("🛡️ Analyse Posting", use_container_width=True)
+
+
+# ── Result ────────────────────────────────────────────────────────────────────
+if submitted:
+    if not title.strip() and not description.strip():
+        st.warning("Please fill in at least the **Job Title** or **Description**.")
+    else:
+        fields = {
+            "title": title, "description": description,
+            "requirements": requirements, "company_profile": company_profile,
+            "benefits": benefits, "industry": industry, "function": function,
+        }
+
+        with st.spinner("Scanning posting…"):
+            full_text = build_full_text(fields)
+            label, fraud_prob = predict(full_text)
+
+        legit_prob = 1 - fraud_prob
+
+        if label == 1:
+            bar_color  = "#ff3b5c"
+            card_class = "result-scam"
+            icon       = "⚠️"
+            verdict    = "Likely a Scam"
+            desc       = ("Our model has flagged this posting as potentially fraudulent. "
+                          "Treat any requests for personal details or upfront payments "
+                          "with extreme caution.")
+        else:
+            bar_color  = "#00e5a0"
+            card_class = "result-safe"
+            icon       = "✅"
+            verdict    = "Looks Legitimate"
+            desc       = ("No strong fraud signals detected. The posting appears to match "
+                          "patterns of genuine job listings — but always do your own "
+                          "due diligence before applying.")
+
+        # Card
+        st.markdown(f"""
+        <div class="result-card {card_class}">
+            <div class="result-icon">{icon}</div>
+            <div class="result-verdict">{verdict}</div>
+            <div class="result-desc">{desc}</div>
+
+            <div class="prob-row">
+                <div class="prob-label">Fraud risk</div>
+                <div class="prob-bar-wrap">
+                    <div class="prob-bar-fill"
+                         style="width:{fraud_prob*100:.1f}%;background:{bar_color};">
+                    </div>
+                </div>
+                <div class="prob-value" style="color:{bar_color};">{fraud_prob:.1%}</div>
+            </div>
+
+            <div class="prob-row">
+                <div class="prob-label">Legit score</div>
+                <div class="prob-bar-wrap">
+                    <div class="prob-bar-fill"
+                         style="width:{legit_prob*100:.1f}%;background:#00e5a0;">
+                    </div>
+                </div>
+                <div class="prob-value" style="color:#00e5a0;">{legit_prob:.1%}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("▸  View raw model input"):
+            st.code(full_text, language="text")
+
+# Footer
+st.markdown("""
+<div class="footer-note">
+    ScamShield · Powered by a fine-tuned transformer · For reference only
+</div>
+""", unsafe_allow_html=True)

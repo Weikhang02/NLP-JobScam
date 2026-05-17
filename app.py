@@ -491,12 +491,7 @@ if submitted:
             </div>
         </div>
         """, unsafe_allow_html=True)
-
-        # Metric boxes
-        col1, col2 = st.columns(2)
-        col1.metric("🔴 Fraud Risk",  f"{fraud_prob:.1%}")
-        col2.metric("🟢 Legit Score", f"{legit_prob:.1%}")
-
+        
 # Footer
 st.markdown("""
 <div class="footer-note">
